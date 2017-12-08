@@ -1,0 +1,294 @@
+---
+title: 'Challenge B Solution'
+author: 'Yan Lingzhao,Qing Zhanqiao,Wang Zerong'
+date: '07/12/2017'
+output: html_document
+---
+
+github repo linking: https://github.com/sumday1/challenge-B-solution
+```{r setup, warning=FALSE,message=FALSE,echo=FALSE}
+install.packages("tidyverse")
+install.packages("grid")
+install.packages("DMwR")
+install.packages("neuralnet")
+install.packages("xtable")
+install.packages("caret")
+install.packages("np")
+install.packages("randomForest")
+install.packages("data.table")
+install.packages("knitr")
+library(ggplot2)
+library(tidyverse)
+library(grid)
+library(DMwR)
+library(neuralnet)
+library(xtable)
+library(caret)
+library(np)
+library(randomForest)
+library(data.table)
+library(knitr)
+```
+
+### Task 1B - Predicting house prices in Ames, Iowa (continued)
+
+#### Step1. Choose a ML technique : non-parametric kernel estimation, random forests, etc. . . Give a brief intuition of how it works.
+We choose random forests to do this. Here is a brief discription:
+
+The random forest model is based on decision trees. Decision trees are built using a heuristic called recursive partitioning. This approach is generally known as divide and conquer because it uses the feature values to split the data into smaller and smaller subsets of similar classes. Beginning at the root node, which represents the entire dataset, the algorithm chooses a feature that is the most predictive of the target class. The examples are then partitioned into groups of distinct values of this feature; this decision forms the first set of tree branches. The algorithm continues to divide-and-conquer the nodes, choosing the best candidate feature each time until a stopping criterion is reached.
+
+The basic idea is that using Bootstrap Method to extract samples from the original training samples and generating new sets of training samples. Thereby generating a plurality of decision trees to form a random forest. The classification number adopts a voting method and the regression number uses the mean value to predict the result.
+
+Steps are as follows:
+
+1)	Determining the number of feature variables used to generate a decision tree
+
+2)	Applying Bootstrap Method to randomly retrieve K new sample sets and build K decision trees. Those samples are not drawn to form K out-of-bag(OOB).
+
+3)	Each sample set grows into a single decision tree, and each node selects the features according to the minimum node impurity values to fully grow, without pruning operation.
+
+4)	Forecasting the prediction set based on the generated decision tree classifier, averaging the forecast results of each tree.
+
+#### Step2. Train the chosen technique on the training data.
+```{r input data,cache=TRUE,echo=FALSE}
+# First put "train.csv" & "test.csv" into working directory.
+# imput data
+train <-read.csv(file="train.csv",header=TRUE) 
+test <-read.csv(file="test.csv",header=TRUE)
+# Merge the train and the test data to do the data cleaning.
+all <- rbind(train[,-81],test)
+# Data cleaning
+# We use loop to remove missing values.
+for( j in 1:80){ # "j" refers to the number of the features. Not include "price".
+  if(is.factor(all[,j])==TRUE){ # Note that NAs in qualitatives variables are not realy a missing values.
+    if(sum(is.na(all[,j]))!=0){ # So we change these NAs in character features into "None".
+      levels(all[,j]) <- c(levels(all[,j]),"None")
+      all[,j][is.na(all[,j])]<-"None"}}
+  
+  if(is.factor(all[,j])==FALSE){ # For numeric features, we use median to impute the missing data.
+    if(sum(is.na(all[,j]))!=0){
+      for(i in which(is.na(all[,j]))){
+        all[,j][i] <- median(all[,j][is.na(all[,j])==FALSE & all$MSSubClass==all$MSSubClass[i] & all$MSZoning==all$MSZoning[i]])}
+      
+    }}
+}
+# We use median to impute the missing data.
+for(i in which(is.na(all$LotFrontage))){
+  all$LotFrontage[i] <- median(all$LotFrontage[is.na(all$LotFrontage)==FALSE])
+}
+
+for(i in which(is.na(all$GarageYrBlt))){
+  all$GarageYrBlt[i] <- median(all$GarageYrBlt[is.na(all$GarageYrBlt)==FALSE & all$MSSubClass==all$MSSubClass[i]])
+}
+# Separate data with no NAs
+train1 <- cbind(all[1:1460,],train[,81])# The first 1460 rows are training data.
+test1 <- all[-(1:1460),-81]# The rest are tesing data with no price.
+names(test1) = names(test)# Rname the columns' name
+names(train1) = names(train)
+```
+
+```{r rf training,cache=TRUE}
+# Train the random forests model, not including the first column(ID).
+model.rf <- randomForest(SalePrice ~ .,data=train1[2:81] ,ntree=500)
+summary(model.rf)
+```
+We choose the randomforest method to build the model on the well-tidied training data. And get relative parameters' features of the model shown in the table.
+
+#### Step3. Make predictions on the test data, and compare them to the predictions of a linear regression of your choice.
+```{r predictions and comparing,cache=TRUE,warning=FALSE, fig.align="center"}
+# Use the model to predict testing data.
+pred.rf <- predict(model.rf,test1,type="response")
+# "prediction-lg.csv" is the prediction in challenge A: Id with the predicted price 
+prediction_lg <- read.csv(file = "prediction-lg.csv",header = TRUE)
+test1$pre_rf <- pred.rf  # Add a column for prediction of random forests
+test1$pre_lg <- prediction_lg$SalePrice  # Add a column for prediction of linear regression
+# 1. The difference between predictions of them. 
+ggplot(test1, aes(x=(pre_lg-pre_rf))) + geom_histogram(binwidth=300)
+# 2. The density plot of the predicted price: red for lg, blue for rf. Purple part is overlapping. 
+ggplot(data = test1)+
+  geom_histogram(aes(x=pre_lg,y=..density..), binwidth=10000, fill = rgb(1, 0, 0, 0.5)) + 
+  geom_histogram(aes(x=pre_rf,y=..density..), binwidth=10000,  fill = rgb(0, 0, 1, 0.5)) +
+  geom_density(aes(x=pre_lg),col = "red") +
+  geom_density(aes(x=pre_rf),col = "blue") 
+```
+We use the trained randomforest model to predict the sale price of the house and compare the results with the previous linear model's. And for the better comparison, we separately draw the difference plot and the density plot of the predicted price of two models on the same testing data.
+
+From two figures, we can conclude that:
+
+1) lg(linear regression) has some smaller preditions than rf(random forests) and their difference is almost like a normal distribution with mean equal to 0. 
+
+2) The density plot of the predicted price of two models are almost the same.
+
+### Task 2B - Overfitting in Machine Learning (continued) - 1 point for each step
+#### Preparation: Load the last codes to create training data and testing data
+```{r, warning=FALSE,results=FALSE}
+set.seed(1)
+x<-rnorm(150, mean = 0, sd = 1)
+e<-rnorm(150, mean = 0, sd = 1)
+y<-(x^3+e)
+t<-data.frame(x = x, y = y)
+yt<-x^3 
+t<-cbind(t,yt)
+training_index <- createDataPartition(t$y , p =0.8 , list = FALSE)
+testing <- slice(t, -training_index)
+training <- slice(t, training_index)
+testing <- cbind(testing, type = "test")
+training <- cbind(training, type = "train")
+all <- rbind(training, testing)
+```
+Here we have a dataset called "all" which consists of training data (with type "train") and testing data (with type "test"). The main variables are x1,y1,yt.
+
+#### Step1. Estimate a low-flexibility local linear model on the training data
+```{r ll.fit.lowflex}
+ll.fit.lowflex <- npreg(y ~ x, data = training, bws = c(0.5),method='ll')
+# Here we bulid a local linear model on the training data with bandwidth=0.5
+summary(ll.fit.lowflex)
+```
+The model ll.fit.lowflex was trained by the training data (nobs=122). 
+
+#### Step2. Estimate a high-flexibility local linear model on the training data
+```{r ll.fit.highflex}
+ll.fit.highflex <- npreg(y ~ x, data = training, bws = c(0.01),method='ll')
+# Here we bulid a high-flexibility local linear model on the training data with bandwidth=0.01(smaller than the last one)
+summary(ll.fit.highflex)
+```
+The model ll.fit.highflex was trained by the training data (nobs=122). 
+
+#### Step3. Plot the scatterplot of x-y along with predictions of both models on only the training data
+```{r predictions on training,fig.align="center"}
+ll.fit.lowflex.p <- npreg(y ~ x, data = training, bws = c(0.5),method='ll',newdata = data.frame(x = all$x))
+all$prelow <- ll.fit.lowflex.p$mean
+# We store the predicting results of the low-flexibility model on both training data and testing data ("all" data)
+ll.fit.highflex.p <- npreg(y ~ x, data = training, bws = c(0.01),method='ll',newdata = data.frame(x = all$x))
+all$prehigh <- ll.fit.highflex.p$mean
+# Similarly, we store the predicting results of the high-flexibility model on both training data and testing data ("all" data)
+# The key here is that we use the variable "type" to distinguish predictions of training data and testing data
+# And then we draw the plot
+ggplot(data = training)+
+  geom_point(mapping = aes(x=x,y=y))+ # The training data points
+  geom_line(mapping = aes(x=x,y=yt))+ # The best estimation curve based on the expection
+  geom_line(mapping=aes(x=x,y=all[all$type == 'train','prelow']),col='red')+ # The predictions of the low-flexibility model
+  geom_line(mapping=aes(x=x,y=all[all$type == 'train','prehigh']),col='blue') # The predictions of the high-flexibility model
+```
+From the figure we can see that the red curve is more smooth than the blue curve and both colorful curves could not cover all the points. But compared with the curve $y=x^3$, the shape of the blue curve is more identical to the best estimation.
+
+#### Step4. Comparison between two models
+```{r comparison1}
+data.frame(model=c('ll.fit.highflex','ll.fit.lowflex'),R2=c(ll.fit.highflex$R2,ll.fit.lowflex$R2))
+```
+We use $R^2$ to measure the bias degree of two models. Generally, the higher the $R^2$ is, the less bias the model is. Based on the figure, we can see that a large proportion of training data points are on the blue curve and away from the red curve. But the blue curve is less smooth than the red curve. Thus it can come to a conclusion that the prediction of the high-flexibility model is more variable and also the high-flexibility model has the least bias.
+
+#### Step5. Plot the scatterplot of x-y along with predictions of both models on only the testing data
+```{r predictions on testing,fig.align="center"}
+ggplot(data = testing)+
+  geom_point(mapping = aes(x=x,y=y))+ # The training data points
+  geom_line(mapping = aes(x=x,y=yt))+ # The best estimation curve based on the expection
+  geom_line(mapping=aes(x=x,y=all[all$type == 'test','prelow']),col='red')+ # The predictions of the low-flexibility model
+  geom_line(mapping=aes(x=x,y=all[all$type == 'test','prehigh']),col='blue') # The predictions of the high-flexibility model
+# MSE has not been calculated
+```
+Like Step3, we also use the type and seperately draw the curves of two models.
+Compared with the smooth red curve, it is more variable. This indicates that the high-flexibility model's prediction is more variable.
+As for the bias, we can see that the based on the plot, the red curve gets nearer to the best estimation $y=x^3$. That means the low-flexibility model becomes the least bias model. 
+
+#### Step6. Create a vector of bandwidth going from 0.01 to 0.5 with a step of 0.001
+```{r bandwidth}
+bw<-seq(0.01,0.5,by=0.001)
+```
+We use the function "seq" to create the numeric vector in which each element stands for one bandwidth.
+
+#### Step7. Estimate a local linear model y ~ x on the training data with each bandwidth
+```{r bw-model}
+ll.fit<-vector(length = length(bw)) # Create a vector for storing the models with different bandwidths
+for(i in 1:length(bw)){
+  ll.fit[i]<-list(npreg(y ~ x, data = training, bws = bw[i], method='ll', newdata = data.frame(x = all$x)))
+}
+# We use a loop to compute each model and store them in the ll.fit vector. And in order to pick up the relative parameters easilier, we store the regression object as "list"
+# And here we combine two steps (training and predicting on training and testing data) into one step so that each element in ll.fit will contain the parameters from the training process and the estimation on both testing and training data.
+```
+Even though there are some warnings, the vector ll.fit works well for storing the regression objects.
+
+#### Step8. Compute for each bandwidth the MSE on the training data
+```{r MSE on training}
+mse.train<-vector(length = length(bw)) # Create a vector for storing the MSE values of the models
+ntrain <- dim(training)[1] # Get the number of observations of the training data
+for(i in 1:length(bw)){
+  mse.train[i] <- (sum( (ll.fit[[i]]$mean[all$type == 'train'] - all[all$type == 'train', 'y'])^2))/ntrain
+}
+# Calculate the MSE for each model on the training data and store the value in the vector "mes.train"
+```
+The method for calculating the MSE of each model is $MSE^{model} = \frac{1}{n}\sum_i (\hat{y}^{model}_i - y_i)^2$. And we apply the formula and store the result in the vector "mes.train".
+
+#### Step9. Compute for each bandwidth the MSE on the test data
+```{r MSE on testing}
+mse.test<-vector(length = length(bw))
+ntest <- dim(testing)[1]
+for(i in 1:length(bw)){
+  mse.test[i] <- (sum( (ll.fit[[i]]$mean[all$type == 'test'] - all[all$type == 'test', 'y'])^2))/ntest
+}
+```
+Like Step8, we generate a vector "mse.test" to store the MSE values from the models on testing data. And the formula to get MSE is the same as that in Step8.
+
+#### Step10. Draw on the same plot how the MSE on training data, and test data, change when the bandwidth increases
+```{r MSE plot, fig.align="center"}
+mes.dt<-data.frame(bandwidth=bw,mse.test=mse.test,mse.train=mse.train)
+# First generate a data that contains all the relevant values
+# And then simply draw the plot
+ggplot(data=mes.dt)+
+  geom_line(mapping = aes(x=bandwidth,y=mse.train),col='blue')+
+  geom_line(mapping = aes(x=bandwidth,y=mse.test),col='orange')
+```
+From the figure, we can see that for the training data, the MSE value will increase with the increase of the bandwidth. But for the testing data, the MSE value will first decrease with the increase of the bandwidth until the bandwidth gets around 0.25 and then will be positive correlated with bandwidth.
+
+We can conclude that the choice of the bandwidth for a local linear model can be an art. We are expected to choose the relatively proper bandwidth when regressing on different data.
+
+### Task 3B - Privacy regulation compliance in France
+#### Step 1 - Import the CNIL dataset from the Open Data Portal.
+```{r }
+#You need to put the data in the same document.
+CNIL <-read.csv(file="OpenCNIL_Organismes_avec_CIL_VD_20171115.csv",header = TRUE, sep = ';', encoding = 'UTF-8' )
+```
+#### Step 2 - Show a (nice) table with the number of organizations that has nominated a CNIL per department.
+```{r, warning=FALSE,message=FALSE}
+#Create a new column for department(first two digits of the postcode).
+CNIL$Department <- substr(as.character(CNIL$Code_Postal),1,2)
+#Use "table" to count the  number of organizations in each department
+depart <- as.data.frame(table(CNIL$Department))
+colnames(depart)<-c("department","count") #rename the column
+#The first two rows are count of "." & ""(none), we merge them as NA. "nanum" is the sum of them.
+nanum<-sum(depart[depart$department=='.',2] ,depart[depart$department=='',2] )
+depart<-depart[2:nrow(depart),]#remove the first row
+depart[1,] <- c('aaaa',nanum)#change the first row now to NA and new count
+kable(depart,digit=1)
+```
+We count different departments by the code and get the table. Some observations could not be identified and thus be marked with "NA".
+
+#### Step 3 - Merge the information from the SIREN dataset into the CNIL data.
+```{r,message=FALSE}
+#Cause this data is too big so you need to move it in the same document as this file.
+#our computer is out of time so we cannot read the whole file, but we do have some useful methods for the merge step. Here we only read 1000000rows .
+#This will cost about 11 s.
+siren<-fread("sirc-17804_9075_14209_201710_L_M_20171101_030132835.csv",header = T, nrows = 1000000, stringsAsFactors = F,encoding = 'Latin-1')
+#First we collect all the SIREN code in CNIL in "scode"
+scode <- as.character(CNIL[,1])
+#Then we only keep rows in "siren"whose SIREN code is in scode.
+cSIREN <- siren[siren$SIREN %in% scode,]
+#To remove the repeated rows, first we sort the cSIREN by SIREN and time(if some rows have same SIREN code they will sorted by time), the most up to date rows are the bottom one.
+cSIREN <- cSIREN[order(cSIREN[,1], cSIREN[,100]), ]
+#Then we use a trick to mark the repeated and not most up to date ones: we move the SIREN one line up (for example: in the original data if it's "1,2,3..", after move it's "2,3..." ). To make them have the same elements, we add an "1" in the moved SIREN
+code1 <- cSIREN$SIREN #code1 is the original one.
+code2 <- c(code1[-1],'1') #code2 is the moved one.
+#Then for a row, if code1 equal to code2, that means it is a useless row(only the bottom one in the repeated rows will not have code1 equal to code2, that is what we need). Only keep rows that code1 differ from code2.
+nSIREN <- cSIREN[(code1 == code2) == FALSE]
+#Then merge them
+colnames(CNIL)[1]<-"SIREN"
+nCNIL <- merge(CNIL , nSIREN , by = "SIREN", all =TRUE)
+```
+First we collect all the SIREN code in CNIL in "scode". Then we only keep rows in "siren"whose SIREN code is in scode. To remove the repeated rows, first we sort the cSIREN by SIREN and time(if some rows have same SIREN code they will sorted by time), the most up to date rows are the bottom one. Then we use a trick to mark the repeated and not most up to date ones: we move the SIREN one line up (for example: in the original data if it's "1,2,3..", after move it's "2,3..." ). To make them have the same elements, we add an "1" in the moved SIREN. Then for a row, if code1 equal to code2, that means it is a useless row(only the bottom one in the repeated rows will not have code1 equal to code2, that is what we need). Only keep rows that code1 differ from code2.Then merge them.
+
+#### Step 4 - Plot the histogram of the size of the companies that nominated a CIL.
+```{r}
+#EFENCENT is the number of employees in the company, we think it can reflect size.
+ggplot(data = nCNIL,aes(x=EFENCENT))+
+  geom_histogram(stat = "count", binwidth = 500)
+```
